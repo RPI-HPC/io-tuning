@@ -112,13 +112,16 @@ class IOTuner(object):
         """Initialize IOTuner object."""
         self._logger = logger
         self._lunMatch = []
+        self._devlun = {}
         cf = ConfigParser.SafeConfigParser()
         cf.read(cFileName)
         self.compile_tuning(cf)
 
     def compile_tuning(self, cf):
         """Compile the tuning information."""
+        logger = self._logger
         for s in cf.sections():
+            logger.debug('Collecting definitions for %s', s)
             try:
                 rexp = cf.get(s, 'regex')
             except ConfigParser.NoOptionError:
@@ -164,69 +167,69 @@ class IOTuner(object):
             self._lunMatch.append( ( r, transfer, readahead, scheduler, opts ) )
                 
 
-def collect_device_lun_SM():
-    """Collect a map of device names to LUNs, using SMdevices"""
+    def collect_device_lun_SM(self):
+        """Collect a map of device names to LUNs, using SMdevices"""
 
-    devlun = {}
+        devlun = self._devlun
 
-    r = re.compile( r'\s*(/dev/\S+).*Logical Drive\s+(\S+),' )
-    P = subprocess.Popen('SMdevices', shell=True,
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         close_fds=True)
-    co,ci,ce = P.stdout, P.stdin, P.stderr
-    for L in co:
-        m = r.match(L)
-        if m:
-            devlun[m.group(1)] = m.group(2)
+        r = re.compile( r'\s*(/dev/\S+).*Logical Drive\s+(\S+),' )
+        P = subprocess.Popen('SMdevices', shell=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             close_fds=True)
+        co,ci,ce = P.stdout, P.stdin, P.stderr
+        for L in co:
+            m = r.match(L)
+            if m:
+                devlun[m.group(1)] = m.group(2)
 
-    return devlun
 
-def process_multipath_devices(devlun):
-    """Go through the list of multipath devices and tune I/O."""
+    def process_multipath_devices(self):
+        """Go through the list of multipath devices and tune I/O."""
 
-    global lunMatch
+        devlun = self._devlun
+        lunMatch = self._lunMatch
 
-    rwnn = re.compile( r'^(?P<wwn>[0-9a-f]+)\s+(?P<dev>dm-\S+)\s' )
-    rscsi = re.compile( r'^\|.*\s+(?P<scsi>sd\S+)\s+' )
+        rwnn = re.compile( r'^(?P<wwn>[0-9a-f]+)\s+(?P<dev>dm-\S+)\s' )
+        rscsi = re.compile( r'^\|.*\s+(?P<scsi>sd\S+)\s+' )
 
-    dmwnn = {}
-    dmlun = {}
-    lundev = None
-    wnn = None
-    
-    P = subprocess.Popen('multipath -ll', shell=True,
-                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                         close_fds=True)
-    co,ci,ce = P.stdout, P.stdin, P.stderr
-    for L in co:
-        M = rwnn.match(L)
-        if M:
-            # We have a line giving wwn and device name.
-            lundev = M.group('dev')
-            wnn =  M.group('wwn')
-            continue
-        M = rscsi.match(L)
-        if M and lundev is not None:
-            s = M.group('scsi')
-            try:
-                lun = devlun[os.path.join('/dev', s)]
-            except KeyError:
-                pass
-            else:
-                dmwnn[lundev] = wnn
-                dmlun[lundev] = lun
-                lundev = wnn = None
+        dmwnn = {}
+        dmlun = {}
+        lundev = None
+        wnn = None
 
-    # Now go through the devices we have located.  Match LUN names,
-    for dm,lun in dmlun.items():
-        for r,transfer,readhead,sched,schedopts in lunMatch:
-            if r.match(lun):
-                BlockDeviceOps.set_io_scheduler(dm, sched)
-                BlockDeviceOps.set_io_transfer_size(dm, transfer)
-                BlockDeviceOps.set_io_readahead_size(dm, readhead)
-                if sched == 'deadline':
-                    fifobatch, = schedopts
-                    BlockDeviceOps.set_io_deadline_fifo_batch(dm, fifobatch)
+        P = subprocess.Popen('multipath -ll', shell=True,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             close_fds=True)
+        co,ci,ce = P.stdout, P.stdin, P.stderr
+        for L in co:
+            M = rwnn.match(L)
+            if M:
+                # We have a line giving wwn and device name.
+                lundev = M.group('dev')
+                wnn =  M.group('wwn')
+                continue
+            M = rscsi.match(L)
+            if M and lundev is not None:
+                s = M.group('scsi')
+                try:
+                    lun = devlun[os.path.join('/dev', s)]
+                except KeyError:
+                    pass
+                else:
+                    dmwnn[lundev] = wnn
+                    dmlun[lundev] = lun
+                    lundev = wnn = None
+
+        # Now go through the devices we have located.  Match LUN names,
+        for dm,lun in dmlun.items():
+            for r,transfer,readhead,sched,schedopts in lunMatch:
+                if r.match(lun):
+                    BlockDeviceOps.set_io_scheduler(dm, sched)
+                    BlockDeviceOps.set_io_transfer_size(dm, transfer)
+                    BlockDeviceOps.set_io_readahead_size(dm, readhead)
+                    if sched == 'deadline':
+                        fifobatch, = schedopts
+                        BlockDeviceOps.set_io_deadline_fifo_batch(dm, fifobatch)
 
 def usage():
     sys.stdout.write('''%s OPTIONS
@@ -277,20 +280,21 @@ def main():
     formatter = logging.Formatter('%(levelname)s: %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    if verbosity >= 2:
-        logger.setLevel(Logging.DEBUG)
+    if verbosity >= 3:
+        logger.setLevel(logging.DEBUG)
+    elif verbosity >= 2:
+        logger.setLevel(logging.INFO)
     elif verbosity >= 1:
-        logger.setLevel(Logging.INFO)
+        logger.setLevel(logging.WARN)
         
     # Set up the IO Tuner object.
     iot = IOTuner(logger, cfile)
-    return
 
     # Collect device information.
-    devlun = collect_device_lun_SM()
+    iot.collect_device_lun_SM()
 
     # Scan through multipath devices and apply attributes.
-    process_multipath_devices(devlun)
+    iot.process_multipath_devices()
 
 if __name__ == '__main__':
     main()
