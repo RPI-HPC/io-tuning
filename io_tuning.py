@@ -1,8 +1,10 @@
 #! /usr/bin/python
 
-import logging
+import ConfigParser
+import logging, logging.handlers
 import os
 import re
+import sys
 import subprocess
 
 # Regular expressions to match LUN characteristics
@@ -104,6 +106,63 @@ class BlockDeviceOps(object):
 
 ################################################################
 
+class IOTuner(object):
+
+    def __init__(self, logger, cFileName):
+        """Initialize IOTuner object."""
+        self._logger = logger
+        self._lunMatch = []
+        cf = ConfigParser.SafeConfigParser()
+        cf.read(cFileName)
+        self.compile_tuning(cf)
+
+    def compile_tuning(self, cf):
+        """Compile the tuning information."""
+        for s in cf.sections():
+            try:
+                rexp = cf.get(s, 'regex')
+            except ConfigParser.NoOptionError:
+                self._logger.error('Section "%s" missing "regex" option', s)
+                continue
+            try:
+                r = re.compile(rexp)
+            except:
+                self._logger.error('Section "%s" invalid "regex" option', s)
+                continue
+            try:
+                transfer = cf.getint(s, 'transfer')
+            except ConfigParser.NoOptionError:
+                self._logger.info('Section "%s" missing "transfer" option', s)
+                transfer = 512
+            except ValueError:
+                self._logger.error('Section "%s", "transfer" option must be integer', s)
+                continue
+            try:
+                readahead = cf.getint(s, 'readahead')
+            except ConfigParser.NoOptionError:
+                self._logger.info('Section "%s" missing "readahead" option', s)
+                readahead = 2*transfer
+            except ValueError:
+                self._logger.error('Section "%s", "readahead" option must be integer', s)
+                continue
+            try:
+                scheduler = cf.get(s, 'scheduler')
+            except ConfigParser.NoOptionError:
+                self._logger.info('Section "%s" missing "scheduler" option', s)
+                scheduler = None
+            opts = []
+            if scheduler == 'deadline':
+                try:
+                    fifo_batch = cf.getint(s, 'fifo_batch')
+                except ConfigParser.NoOptionError:
+                    self._logger.info('Section "%s" missing "fifo_batch" option', s)
+                    fifo_batch = None
+                except ValueError:
+                    self.logger.error('Section "%s", "fifo_batch" option must be integer', s)
+                    continue
+                opts = [ fifo_batch, ]
+            self._lunMatch.append( ( r, transfer, readahead, scheduler, opts ) )
+                
 
 def collect_device_lun_SM():
     """Collect a map of device names to LUNs, using SMdevices"""
@@ -169,10 +228,63 @@ def process_multipath_devices(devlun):
                     fifobatch, = schedopts
                     BlockDeviceOps.set_io_deadline_fifo_batch(dm, fifobatch)
 
+def usage():
+    sys.stdout.write('''%s OPTIONS
+
+    OPTIONS are:
+
+    -h,--help          Display this help
+    -c,--config=FNAME  Use FNAME as the configuration file
+    -l,--log=LNAME     Use LNAME as a log file (otherwise use syslog)
+    -v,--verbose       Verbose logging\n''' % (sys.argv[0],))
+
 def main():
+    import getopt
+    
+    # Parse the command line.
+    try:
+        opts,args = getopt.getopt(sys.argv[1:],
+                                  "h?c:l:v", [
+                                      "help","config=","log=","verbose"])
+    except getop.GetoptError, err:
+        sys.stderr.write(sys.argv[0]+": "+str(err))
+        usage()
+        sys.exit(1)
+    cfile = None
+    lfile = None
+    verbosity = 0
+    for o,a in opts:
+        if o in ('-h','-?','--help'):
+            usage()
+            sys.exit(0)
+        elif o in ('-c','--config'):
+            cfile = a
+        elif o in ('-l','--log'):
+            lfile = a
+        elif o in ('-v','--verbose'):
+            verbosity += 1
+        else:
+            assert False,'error in command line options'
+
     # Set up logging.
-    # FIXME: Change to use logging.handlers.SysLogHandler
-    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+    logger = logging.getLogger('io_tuning')
+    if lfile is None:
+        handler = logging.handlers.SysLogHandler(address='/dev/log')
+    elif lfile in ('-', 'stderr'):
+        handler = logging.StreamHandler()
+    else:
+        handler = logging.FileHandler(lfile)
+    formatter = logging.Formatter('%(levelname)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    if verbosity >= 2:
+        logger.setLevel(Logging.DEBUG)
+    elif verbosity >= 1:
+        logger.setLevel(Logging.INFO)
+        
+    # Set up the IO Tuner object.
+    iot = IOTuner(logger, cfile)
+    return
 
     # Collect device information.
     devlun = collect_device_lun_SM()
