@@ -55,22 +55,25 @@ class BlockDeviceOps(object):
     """Collect common operations on block devices."""
     # FIXME: Derive a class for Linux, have an abstract base class.
 
-    @classmethod
-    def set_io_variable(cls, dev, var, val):
+    def __init__(self, logger):
+        self._logger = logger
+
+    def set_io_variable(self, dev, var, val):
         """Set a I/O elevator variable on the device."""
         import os.path, glob
+        logger = self._logger
 
         # Find the device under /sys/block.  We may need to resolve
         # symlinks.
         dev = os.path.realpath(dev)
         key = os.path.basename(dev)
         if not os.path.isdir('/sys/block/' + key):
-            logging.warn('Unable to manipulate I/O tunable %s for %s',
-                         var, dev)
+            logger.warn('Unable to manipulate I/O tunable %s for %s',
+                        var, dev)
             return
         # We need to manage slave settings first.
         for s in glob.iglob('/sys/block/'+key+'/slaves/*'):
-            cls.set_io_variable(s, var, val)
+            self.set_io_variable(s, var, val)
 
         # Now set it for the master.
         sbname = '/sys/block/'+key+'/'+var
@@ -78,30 +81,26 @@ class BlockDeviceOps(object):
             try:
                 f.write(str(val))
             except:
-                logging.warn('Failed to update %s to %s: %s',
-                             sbname, val, sys.exc_value)
+                logger.warn('Failed to update %s to %s: %s',
+                            sbname, val, sys.exc_value)
             else:
-                logging.info('Update %s to %s', sbname, val)
+                logger.info('Update %s to %s', sbname, val)
 
-    @classmethod
-    def set_io_scheduler(cls, dev, sched):
+    def set_io_scheduler(self, dev, sched):
         """Set the I/O scheduler"""
-        cls.set_io_variable(dev, 'queue/scheduler', sched)
+        self.set_io_variable(dev, 'queue/scheduler', sched)
 
-    @classmethod
-    def set_io_transfer_size(cls, dev, s):
+    def set_io_transfer_size(self, dev, s):
         """Set the I/O transfer size to the device"""
-        cls.set_io_variable(dev, 'queue/max_sectors_kb', s)
+        self.set_io_variable(dev, 'queue/max_sectors_kb', s)
 
-    @classmethod
-    def set_io_readahead_size(cls, dev, s):
+    def set_io_readahead_size(self, dev, s):
         """Set the I/O readahead size to the device"""
-        cls.set_io_variable(dev, 'queue/read_ahead_kb', s)
+        self.set_io_variable(dev, 'queue/read_ahead_kb', s)
 
-    @classmethod
-    def set_io_deadline_fifo_batch(cls, dev, s):
+    def set_io_deadline_fifo_batch(self, dev, s):
         """Set the deadline scheduler fifo batch size."""
-        cls.set_io_variable(dev, 'queue/iosched/fifo_batch', s)
+        self.set_io_variable(dev, 'queue/iosched/fifo_batch', s)
 
 
 ################################################################
@@ -113,6 +112,7 @@ class IOTuner(object):
         self._logger = logger
         self._lunMatch = []
         self._devlun = {}
+        self._blkops = BlockDeviceOps(logger)
         cf = ConfigParser.SafeConfigParser()
         cf.read(cFileName)
         self.compile_tuning(cf)
@@ -221,15 +221,16 @@ class IOTuner(object):
                     lundev = wnn = None
 
         # Now go through the devices we have located.  Match LUN names,
+        blkops = self._blkops
         for dm,lun in dmlun.items():
             for r,transfer,readhead,sched,schedopts in lunMatch:
                 if r.match(lun):
-                    BlockDeviceOps.set_io_scheduler(dm, sched)
-                    BlockDeviceOps.set_io_transfer_size(dm, transfer)
-                    BlockDeviceOps.set_io_readahead_size(dm, readhead)
+                    blkops.set_io_scheduler(dm, sched)
+                    blkops.set_io_transfer_size(dm, transfer)
+                    blkops.set_io_readahead_size(dm, readhead)
                     if sched == 'deadline':
                         fifobatch, = schedopts
-                        BlockDeviceOps.set_io_deadline_fifo_batch(dm, fifobatch)
+                        blkops.set_io_deadline_fifo_batch(dm, fifobatch)
 
 def usage():
     sys.stdout.write('''%s OPTIONS
