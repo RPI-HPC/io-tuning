@@ -146,6 +146,7 @@ class IOTuner(object):
 
         devlun = self._devlun
         lunMatch = self._lunMatch
+        logger = self._logger
 
         rwnn = re.compile( r'^(?P<wwn>[0-9a-f]+)\s+(?P<dev>dm-\S+)\s' )
         rscsi = re.compile( r'^\|.*\s+(?P<scsi>sd\S+)\s+' )
@@ -183,6 +184,7 @@ class IOTuner(object):
         for dm,lun in dmlun.items():
             for r,transfer,readhead,sched,schedopts in lunMatch:
                 if r.match(lun):
+                    logger.info('Set attributes on %s (%s)', lun, dm)
                     blkops.set_io_scheduler(dm, sched)
                     blkops.set_io_transfer_size(dm, transfer)
                     blkops.set_io_readahead_size(dm, readhead)
