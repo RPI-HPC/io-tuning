@@ -7,48 +7,6 @@ import re
 import sys
 import subprocess
 
-# Regular expressions to match LUN characteristics
-
-lunMatch = (
-    # regex transfer, readahead, sched, schedOpts
-    # test u, data
-    ( re.compile(r'[gG].*[0-9]A[0-9]+D'),
-      8192, 16384, 'noop', () ),
-    # test u, metadata
-    ( re.compile(r'[gG].*[0-9][AT][0-9]+M'),
-      1024, 2048, 'noop', () ),
-    # test DBHome, data
-    ( re.compile(r'[gG].*[0-9]DBH[0-9]+D'),
-      1024, 2048, 'noop', () ),
-    # test DBHome, metadata
-    ( re.compile(r'[gG].*[0-9]DBH[0-9]+M'),
-      1024, 2048, 'noop', () ),
-    # test BGSYS, data
-    ( re.compile(r'[gG].*[0-9]BGS[0-9]+D'),
-      1024, 2048, 'noop', () ),
-    # test BGSYS, metadata
-    ( re.compile(r'[gG].*[0-9]BGS[0-9]+M'),
-      1024, 2048, 'noop', () ),
-    #( re.compile(r'[gG].*[0-9]A[0-9]+A'),
-    #  8192, 8192, 'deadline', (16,) ),
-    # test admin
-    ( re.compile(r'[gG].*[0-9]A[0-9]+A'),
-      8192, 16384, 'noop', () ),
-    # sb, data
-    ( re.compile(r'[gG].*[0-9][dD][sS][Bb][0-9]+'),
-      4096, 8192, 'deadline', (32,) ),
-    # sb, metadata
-    ( re.compile(r'[gG].*[0-9][mM][sS][Bb][0-9]+'),
-      4096, 8192, 'deadline', (16,) ),
-    # lb, data
-    ( re.compile(r'[gG].*[0-9][dD][lL][Bb][0-9]+'),
-      8192, 16384, 'deadline', (32,) ),
-    # lb, metadata
-    ( re.compile(r'[gG].*[0-9][mM][lL][Bb][0-9]+'),
-      4096, 8192, 'deadline', (16,) ),
-    
-    )
-
 ################################################################
 
 class BlockDeviceOps(object):
