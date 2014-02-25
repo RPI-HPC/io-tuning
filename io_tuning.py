@@ -60,6 +60,22 @@ class BlockDeviceOps(object):
         """Set the deadline scheduler fifo batch size."""
         self.set_io_variable(dev, 'queue/iosched/fifo_batch', s)
 
+    def set_io_deadline_read_expire(self, dev, s):
+        """Set the deadline scheduler read expire (ms)."""
+        self.set_io_variable(dev, 'queue/iosched/read_expire', s)
+
+    def set_io_deadline_write_expire(self, dev, s):
+        """Set the deadline scheduler write expire (ms)."""
+        self.set_io_variable(dev, 'queue/iosched/write_expire', s)
+
+    def set_io_deadline_writes_starved(self, dev, s):
+        """Set the deadline scheduler write starvation factor."""
+        self.set_io_variable(dev, 'queue/iosched/writes_starved', s)
+
+    def set_io_deadline_front_merges(self, dev, s):
+        """Set the deadline scheduler front merges flag."""
+        self.set_io_variable(dev, 'queue/iosched/front_merges', s)
+
 
 ################################################################
 
@@ -113,15 +129,17 @@ class IOTuner(object):
                 scheduler = None
             opts = []
             if scheduler == 'deadline':
-                try:
-                    fifo_batch = cf.getint(s, 'fifo_batch')
-                except ConfigParser.NoOptionError:
-                    self._logger.info('Section "%s" missing "fifo_batch" option', s)
-                    fifo_batch = None
-                except ValueError:
-                    self.logger.error('Section "%s", "fifo_batch" option must be integer', s)
-                    continue
-                opts = [ fifo_batch, ]
+                opts = []
+                for deadOpt in ('fifo_batch', 'read_expire', 'write_expire', 'writes_starved', 'front_merges'):
+                    try:
+                        deadVal = cf.getint(s, deadOpt)
+                    except ConfigParser.NoOptionError:
+                        self._logger.info('Section "%s" missing "%s" option', s, deadOpt)
+                        deadVal = None
+                    except ValueError:
+                        self.logger.error('Section "%s", "%s" option must be integer', s, deadOpt)
+                        continue
+                    opts += [ deadVal ]
             self._lunMatch.append( ( r, transfer, readahead, scheduler, opts ) )
                 
 
@@ -189,8 +207,17 @@ class IOTuner(object):
                     blkops.set_io_transfer_size(dm, transfer)
                     blkops.set_io_readahead_size(dm, readhead)
                     if sched == 'deadline':
-                        fifobatch, = schedopts
-                        blkops.set_io_deadline_fifo_batch(dm, fifobatch)
+                        fifobatch,read_expire,write_expire,writes_starved,front_merges = schedopts
+                        if fifobatch is not None:
+                            blkops.set_io_deadline_fifo_batch(dm, fifobatch)
+                        if read_expire is not None:
+                            blkops.set_io_deadline_read_expire(dm, read_expire)
+                        if write_expire is not None:
+                            blkops.set_io_deadline_write_expire(dm, write_expire)
+                        if writes_starved is not None:
+                            blkops.set_io_deadline_writes_starved(dm, writes_starved)
+                        if front_merges is not None:
+                            blkops.set_io_deadline_front_merges(dm, front_merges)
 
 def usage():
     sys.stdout.write('''%s OPTIONS
